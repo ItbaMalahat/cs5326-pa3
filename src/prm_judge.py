@@ -40,9 +40,20 @@ def build_prm_judge_prompt(
         "Evaluate the current step using the problem statement "
         "and the preceding steps as given.\n\n"
 
-        "A step is VALID if its arithmetic is correct and "
-        "it follows logically from the available information.\n"
-        "Otherwise, it is INVALID.\n\n"
+        "A step is VALID only if ALL of the following hold:\n"
+        "1. Its arithmetic is correct.\n"
+        "2. It follows logically from the available information.\n"
+        "3. It actually performs a calculation with concrete "
+        "numbers, rather than only describing an intention to "
+        "calculate something without carrying it out.\n"
+        "4. The quantity it computes correctly matches what the "
+        "problem is actually asking for or defining at this point. "
+        "For example, if the problem asks for a profit, a "
+        "difference, or a net change, a step that instead computes "
+        "a total, a sum, or an original-plus-increase value is "
+        "INVALID even when its arithmetic is correct, because it "
+        "answers a different question than the one that was asked.\n"
+        "If any of these conditions fails, the step is INVALID.\n\n"
 
         f"Question:\n{question}\n\n"
 
