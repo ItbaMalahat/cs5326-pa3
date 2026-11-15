@@ -79,11 +79,13 @@ def parse_judge_decision(
     if not isinstance(judge_output, str):
         return -1.0, ""
 
-    # Look for explicit verdict lines first.
+    # Look for explicit verdict lines first. Not anchored to the
+    # start of a line, so markdown like "**Verdict:** VALID" still
+    # matches (the ** would otherwise block the ^ anchor).
     # Match INVALID before VALID to avoid substring errors.
     verdict_pattern = re.compile(
-        r"^\s*Verdict\s*:\s*\**\s*(INVALID|VALID)\b",
-        flags=re.IGNORECASE | re.MULTILINE,
+        r"Verdict\s*:\s*\**\s*(INVALID|VALID)\b",
+        flags=re.IGNORECASE,
     )
 
     match = verdict_pattern.search(judge_output)
