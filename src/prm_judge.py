@@ -159,6 +159,100 @@ def parse_judge_decision(
     return score, rationale
 
 
+def score_verdict_logprob(
+    judge_model: Any,
+    judge_tokenizer: Any,
+    question: str,
+    preceding_steps: list[str],
+    current_step: str,
+) -> float:
+    """
+    Optional +3 bonus (PA3.pdf Sec 2.4, item 4): continuous step
+    confidence
+
+        p_t = exp(z_VALID) / (exp(z_VALID) + exp(z_INVALID))
+
+    computed from the judge model's raw logits at the verdict token,
+    instead of the binary +-1.0 score from parse_judge_decision.
+
+    Approach used: FULL-SEQUENCE LOG-PROBABILITIES, not first-token
+    logits. "VALID" and "INVALID" are not guaranteed to tokenize to a
+    single, position-aligned token under the Qwen2.5 tokenizer, so a
+    first-token comparison could silently misalign. Instead, we teacher-
+    force the judge model on the prompt followed by the literal
+    continuation "Verdict: VALID" and, separately, "Verdict: INVALID",
+    sum each continuation's token-level log-probabilities under the
+    model (no sampling, no generation loop - a single forward pass per
+    candidate continuation), and softmax the two summed log-probs
+    against each other. This reuses an already-generated candidate's
+    steps; it does not require any new text generation.
+
+    This report MUST state that the full-sequence approach was used
+    (PA3.pdf Sec 2.4 requires stating which of the two approaches was
+    chosen).
+    """
+    import math
+
+    import torch
+
+    prompt = build_prm_judge_prompt(
+        question=question,
+        preceding_steps=preceding_steps,
+        current_step=current_step,
+    )
+    formatted_prompt = judge_tokenizer.apply_chat_template(
+        [{"role": "user", "content": prompt}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    prompt_ids = judge_tokenizer(
+        formatted_prompt, return_tensors="pt", add_special_tokens=False
+    )["input_ids"][0]
+
+    # The two literal continuations we score. Tokenized without special
+    # tokens so they concatenate cleanly onto the end of the prompt.
+    candidate_texts = {
+        "VALID": "Verdict: VALID",
+        "INVALID": "Verdict: INVALID",
+    }
+    summed_logprobs: dict[str, float] = {}
+
+    for label, text in candidate_texts.items():
+        cand_ids = judge_tokenizer(
+            text, add_special_tokens=False, return_tensors="pt"
+        )["input_ids"][0]
+
+        full_ids = torch.cat([prompt_ids, cand_ids]).unsqueeze(0)
+        full_ids = full_ids.to(judge_model.device)
+
+        with torch.no_grad():
+            logits = judge_model(full_ids).logits[0]
+
+        # logits[i] predicts the token AT position i+1, so the logits
+        # that predict the candidate continuation start at
+        # (len(prompt_ids) - 1).
+        start = prompt_ids.shape[0] - 1
+        total_logprob = 0.0
+
+        for j in range(cand_ids.shape[0]):
+            step_logits = logits[start + j]
+            log_probs = torch.log_softmax(step_logits, dim=-1)
+            total_logprob += log_probs[cand_ids[j]].item()
+
+        summed_logprobs[label] = total_logprob
+
+    z_valid = summed_logprobs["VALID"]
+    z_invalid = summed_logprobs["INVALID"]
+
+    # Numerically stable 2-way softmax.
+    m = max(z_valid, z_invalid)
+    p_valid = math.exp(z_valid - m) / (
+        math.exp(z_valid - m) + math.exp(z_invalid - m)
+    )
+
+    return p_valid
+
+
 def score_path(
     judge_model: Any = None,
     judge_tokenizer: Any = None,

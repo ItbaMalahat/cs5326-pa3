@@ -21,7 +21,8 @@ JudgeFn = Callable[[str], dict]
 def aggregate_path_score(
     step_scores: list[float],
     strategy: str = "min",
-    penalty_lambda: float = 2.0
+    penalty_lambda: float = 2.0,
+    step_confidences: list[float] | None = None,
 ) -> float:
     """
     Combine individual PRM step scores into one path score.
@@ -30,13 +31,33 @@ def aggregate_path_score(
       min
       product
       step_penalty
+      product_logprob (optional +3 bonus, PA3.pdf Sec 2.4 item 4):
+        uses the judge's continuous per-step confidence p_t = P(VALID)
+        from score_verdict_logprob, instead of the binary +-1.0 verdict
+        clamped into {0.01, 0.99} the way "product" does. Requires
+        step_confidences (one P(VALID) in (0, 1) per step, same order
+        as step_scores).
     """
 
     # Reject unsupported strategies.
-    if strategy not in {"min", "product", "step_penalty"}:
+    if strategy not in {"min", "product", "step_penalty", "product_logprob"}:
         raise ValueError(
             f"Unknown aggregation strategy: {strategy}"
         )
+
+    if strategy == "product_logprob":
+        # A path without reasoning steps, or without confidences
+        # computed for it, gets the lowest default score.
+        if not step_confidences:
+            return -1.0
+
+        product = 1.0
+        for p in step_confidences:
+            # Avoid exact zero or one, same spirit as "product".
+            p_clamped = max(0.001, min(0.999, p))
+            product *= p_clamped
+
+        return float(product)
 
     # A path without reasoning steps gets the lowest
     # default score, regardless of aggregation strategy.
@@ -101,6 +122,7 @@ def select_best_path(
             candidate["step_scores"],
             strategy=aggregation_strategy,
             penalty_lambda=penalty_lambda,
+            step_confidences=candidate.get("step_confidences"),
         )
         for candidate in candidate_paths
     ]
