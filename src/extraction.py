@@ -70,7 +70,6 @@ def parse_steps(completion_text: str) -> list[str]:
 
     return steps
 
-
 def extract_answer(completion_text: str) -> int | None:
     """
     Extract the integer following the LAST Final Answer label.
@@ -89,11 +88,13 @@ def extract_answer(completion_text: str) -> int | None:
     if not isinstance(completion_text, str) or not completion_text:
         return None
 
-    # Match final-answer labels, including Markdown.
+    # Match final-answer labels, including Markdown, ANYWHERE in the
+    # text (not just at the start of a line). A word boundary before
+    # "Final" stops this from matching inside a longer word.
     label_pattern = re.compile(
-        r"^[ \t]*[#*` \t]*Final[ \t]+Answer"
-        r"[ \t]*[:]?[*` \t]*",
-        flags=re.IGNORECASE | re.MULTILINE,
+        r"[#*`\s]*\bFinal[ \t]+Answer\b"
+        r"[ \t]*:?[ \t]*[*`]*[ \t]*",
+        flags=re.IGNORECASE,
     )
 
     matches = list(label_pattern.finditer(completion_text))
@@ -111,10 +112,13 @@ def extract_answer(completion_text: str) -> int | None:
     ].split("\n", 1)[0].strip()
 
     # Allow an optional currency symbol, sign, commas,
-    # and a decimal component.
+    # and a decimal component. Only reject the match if another
+    # DIGIT immediately follows (meaning we stopped mid-number);
+    # trailing punctuation like "." or "," is fine, since that's
+    # just the end of the sentence, not part of the number.
     number_match = re.match(
         r"^\$?\s*([+-]?\d[\d,]*(?:\.\d+)?)"
-        r"(?![\d.,])",
+        r"(?!\d)",
         answer_line,
     )
 
